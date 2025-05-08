@@ -8,9 +8,19 @@ VotingClassifier:
   init_args:
     flatten_transform: False
   estimators:
-    - LinearDiscriminantAnalysis
-    - RandomForestClassifier
-    - SVC
+    - type: sklearn.discriminant_analysis.LinearDiscriminantAnalysis
+      init_args:
+        solver: svd
+    - type: sklearn.ensemble.RandomForestClassifier
+      init_args:
+        n_estimators: 500
+        max_leaf_nodes: 2
+        random_state: 6020
+    - type: sklearn.svm.SVC
+      init_args:
+        kernel: linear
+        probability: True
+        random_state: 6020
 
 LinearDiscriminantAnalysis:
   type: sklearn.discriminant_analysis.LinearDiscriminantAnalysis
