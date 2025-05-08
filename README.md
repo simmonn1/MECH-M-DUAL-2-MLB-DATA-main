@@ -1,0 +1,1 @@
+Companion repository for the lecture [Machine Learning in Industrial Image Processing](https://kandolfp.github.io/MECH-M-DUAL-2-MLB/), especially section [5 Code persistence](https://kandolfp.github.io/MECH-M-DUAL-2-MLB/data/code.html).
