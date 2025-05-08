@@ -76,7 +76,6 @@ def main():
         dir.mkdir(parents=True, exist_ok=True)
         file = dir / "model.skops"
         save(voting_clf, file, X_train[:1])
-        live.log_artifact(file.relative_to(Path(".")), type="model")
 
 
 if __name__ == "__main__":
