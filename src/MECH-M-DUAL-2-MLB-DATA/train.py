@@ -5,68 +5,79 @@ from omegaconf import OmegaConf
 from importlib import import_module
 from dvclive import Live
 from clean_repo import require_clean_git
-import model
 from data import load_cats_vs_dogs
 from myio import save_skops as save
+import model
 
-def param_from_yaml(live, component):
-    """Log parameters dynamically from the configuration."""
-    prefix = component.type.split(".")[-1]
+
+def param_from_yaml(live, component, name_prefix=None):
+    prefix = name_prefix or component.type.split(".")[-1]
     for name, value in component.init_args.items():
-        live.log_param(prefix + "/" + name, value)
+        live.log_param(f"{prefix}/{name}", value)
+
+
+def load_component(component_conf):
+    module_path, class_name = component_conf["type"].rsplit(".", 1)
+    module = import_module(module_path)
+    cls = getattr(module, class_name)
+    return cls(**component_conf["init_args"])
+
 
 @require_clean_git
 def main():
-    logging.basicConfig(format='%(levelname)s:%(name)s: %(message)s', level=logging.DEBUG)
+    logging.basicConfig(format='%(levelname)s:%(name)s: %(message)s',
+                        level=logging.DEBUG)
 
-    # Load dataset
     X_train, y_train, X_test, y_test = load_cats_vs_dogs()
 
     logging.debug("Load config")
     params_path = Path(".") / "params.yaml"
     params = OmegaConf.load(params_path)
 
-    # Dynamically load PCA class
-    pca_module = import_module(params["PCA"].type.rsplit(".", 1)[0])
-    PCA = getattr(pca_module, params["PCA"].type.rsplit(".", 1)[-1])
-    pca = PCA(**params["PCA"].init_args)
+    # Load PCA component
+    pca_conf = params["PCA"]
+    pca = load_component(pca_conf)
 
-    # Dynamically load the estimators
+    # Load estimators
+    estimator_names = params["VotingClassifier"]["estimators"]
     estimators = []
-    for estimator_params in params["VotingClassifier"].estimators:
-        estimator_module = import_module(estimator_params.type.rsplit(".", 1)[0])
-        EstimatorClass = getattr(estimator_module, estimator_params.type.rsplit(".", 1)[-1])
-        estimator = EstimatorClass(**estimator_params.init_args)
-        estimators.append(estimator)
+    for name in estimator_names:
+        est_conf = params[name]
+        est_instance = load_component(est_conf)
+        estimators.append((name, est_instance))
 
-    # Create the classifier
-    voting_clf = model.get(params["VotingClassifier"], estimators)
+    # Load VotingClassifier dynamically
+    voting_conf = params["VotingClassifier"]
+    voting_args = dict(voting_conf["init_args"])
+    voting_args["estimators"] = estimators
 
-    # Start training and logging with DVCLive
+    voting_module, voting_class_name = voting_conf["type"].rsplit(".", 1)
+    VotingClass = getattr(import_module(voting_module), voting_class_name)
+    voting_clf = VotingClass(**voting_args)
+
+    # Logging and training
     with Live() as live:
-        # Log the PCA and estimator parameters
-        param_from_yaml(live, params["PCA"])
-        for est in estimators:
-            param_from_yaml(live, est)
-        
+        param_from_yaml(live, pca_conf, name_prefix="PCA")
+        for name in estimator_names:
+            param_from_yaml(live, params[name], name_prefix=name)
+
         logging.debug("Train classifier")
         voting_clf.fit(X_train, y_train)
 
-        # Log metrics
-        metrics = model.evaluate(voting_clf, [[X_train, y_train, "train"], [X_test, y_test, "test"]])
+        metrics = model.evaluate(voting_clf, [[X_train, y_train, "train"],
+                                              [X_test, y_test, "test"]])
         for metric_name, value in metrics.items():
             live.log_metric(metric_name, value)
 
-        # Predict and log confusion matrix
         y_pred = voting_clf.predict(X_test)
         live.log_sklearn_plot("confusion_matrix", y_test, y_pred)
 
-        # Save the model
-        artifacts_dir = Path(live.dir) / "artifacts"
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
-        file = artifacts_dir / "model.skops"
+        dir = Path(live.dir) / "artifacts"
+        dir.mkdir(parents=True, exist_ok=True)
+        file = dir / "model.skops"
         save(voting_clf, file, X_train[:1])
         live.log_artifact(file.relative_to(Path(".")), type="model")
+
 
 if __name__ == "__main__":
     main()
